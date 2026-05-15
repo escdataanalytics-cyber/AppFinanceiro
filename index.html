@@ -687,25 +687,79 @@ async function doLogin(){
 async function doReg(){
   const nm=v('rg-nm').trim(),em=v('rg-em').trim(),pw=v('rg-pw');
   const gr=v('rg-gr').trim(),cd=v('rg-cd').trim().toUpperCase();
-  if(!nm||!em||!pw)return toast('Preencha todos os campos','err');
-  if(!gr&&!cd)return toast('Informe um grupo ou código de convite','err');
+  
+  // Validações
+  if(!nm)return toast('Informe seu nome','err');
+  if(!em)return toast('Informe seu e-mail','err');
+  if(!pw||pw.length<6)return toast('Senha deve ter mínimo 6 caracteres','err');
+  if(!gr&&!cd)return toast('Crie um grupo ou informe um código de convite','err');
+  if(gr&&cd)return toast('Escolha apenas uma opção: criar grupo OU usar convite','err');
+  
   setBtnLoading('btn-reg',true);
+  
+  // Criar usuário no auth
   const{data,error}=await sb.auth.signUp({email:em,password:pw});
-  if(error){setBtnLoading('btn-reg',false);showAuthErr('Erro: '+error.message);return;}
-  const uid=data.user.id;let gid=null;
-  if(cd){
-    const{data:gg,error:ge}=await sb.from('grupos').select('id').eq('codigo_convite',cd).single();
-    if(ge||!gg){setBtnLoading('btn-reg',false);showAuthErr('Código de convite inválido');return;}
-    gid=gg.id;
-  } else {
-    const{data:gg,error:ge}=await sb.from('grupos').insert({nome:gr}).select().single();
-    if(ge){setBtnLoading('btn-reg',false);showAuthErr('Erro ao criar grupo: '+ge.message);return;}
-    gid=gg.id;
+  if(error){
+    setBtnLoading('btn-reg',false);
+    showAuthErr('Erro ao criar conta: '+error.message);
+    return;
   }
-  const{error:pe}=await sb.from('perfis').insert({id:uid,nome:nm,email:em,grupo_id:gid,papel:cd?'membro':'admin'});
-  if(pe){setBtnLoading('btn-reg',false);showAuthErr('Erro ao criar perfil: '+pe.message);return;}
-  if(!cd){await sb.from('categorias').insert(CATS_DEF.map(c=>({...c,grupo_id:gid})));}
+  
+  const uid=data.user.id;
+  let gid=null;
+  let isAdmin=false;
+
+  if(cd){
+    // Entrar em grupo existente via código
+    const{data:gg,error:ge}=await sb.from('grupos')
+      .select('id')
+      .eq('codigo_convite',cd)
+      .single();
+    if(ge||!gg){
+      setBtnLoading('btn-reg',false);
+      showAuthErr('Código de convite inválido ou não encontrado');
+      return;
+    }
+    gid=gg.id;
+    isAdmin=false;
+  } else {
+    // Criar novo grupo
+    const{data:gg,error:ge}=await sb.from('grupos')
+      .insert({nome:gr})
+      .select()
+      .single();
+    if(ge||!gg){
+      setBtnLoading('btn-reg',false);
+      showAuthErr('Erro ao criar grupo: '+ge?.message);
+      return;
+    }
+    gid=gg.id;
+    isAdmin=true;
+  }
+
+  // Criar perfil
+  const{error:pe}=await sb.from('perfis')
+    .insert({
+      id:uid,
+      nome:nm,
+      email:em,
+      grupo_id:gid,
+      papel:isAdmin?'admin':'membro'
+    });
+  if(pe){
+    setBtnLoading('btn-reg',false);
+    showAuthErr('Erro ao criar perfil: '+pe.message);
+    return;
+  }
+
+  // Inserir categorias padrão se criou grupo novo
+  if(isAdmin){
+    await sb.from('categorias')
+      .insert(CATS_DEF.map(c=>({...c,grupo_id:gid})));
+  }
+
   setBtnLoading('btn-reg',false);
+  toast('Conta criada com sucesso!','ok');
   await loadUser(data.user);
 }
 
